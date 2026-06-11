@@ -13,6 +13,8 @@ services:
       - "8111:8080"
     environment:
       PORT: "8080"
+      # Uncomment to enable Basic Auth on the UI (username = anything, password = token)
+      # WEBHOOK_TOKEN: "changeme"
     restart: unless-stopped
     # Resource limits — sensible defaults for a lightweight tool.
     deploy:

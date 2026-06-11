@@ -6,227 +6,392 @@
   <title>Webhook Tester</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    /* Custom scrollbar for dark theme */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #0f172a; }
-    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    ::-webkit-scrollbar        { width:6px; height:6px }
+    ::-webkit-scrollbar-track  { background:#0f172a }
+    ::-webkit-scrollbar-thumb  { background:#334155; border-radius:3px }
+    /* JSON syntax colours */
+    .tk-key     { color:#67e8f9 }   /* sky-300   — object keys   */
+    .tk-str     { color:#34d399 }   /* emerald-400 — string vals */
+    .tk-num     { color:#fbbf24 }   /* amber-400   — numbers     */
+    .tk-kw      { color:#a78bfa }   /* violet-400  — true/false/null */
   </style>
 </head>
 <body class="min-h-screen bg-slate-950 text-slate-200 font-mono antialiased">
 
-  <!-- ── Top bar ─────────────────────────────────────────────────────────── -->
+  <!-- ── Toast ──────────────────────────────────────────────────────────── -->
+  <div id="toast" class="fixed bottom-6 right-6 z-50 hidden transition-all">
+    <div class="bg-slate-700 border border-slate-600 text-slate-200 text-xs px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2">
+      <svg class="w-3.5 h-3.5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+      </svg>
+      <span id="toast-msg">Copied!</span>
+    </div>
+  </div>
+
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
   <header class="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
-    <div class="mx-auto max-w-5xl flex items-center justify-between px-4 py-3">
+    <div class="mx-auto max-w-5xl flex items-center gap-3 px-4 py-3">
 
-      <div class="flex items-center gap-3">
-        <span class="text-lg font-bold text-white tracking-tight">Webhook Tester</span>
-        <span class="hidden sm:inline text-slate-500 text-xs">
-          POST to <code class="text-emerald-400 bg-slate-900 px-1.5 py-0.5 rounded">/webhook</code>
-        </span>
+      <a href="/" class="text-sm font-bold text-white tracking-tight shrink-0 hover:text-emerald-400 transition-colors">
+        Webhook Tester
+      </a>
+
+      <!-- Search / filter -->
+      <input id="search" type="search" autocomplete="off" spellcheck="false"
+             placeholder="Filter by body or header…"
+             class="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-600 transition-colors" />
+
+      <!-- SSE connection dot -->
+      <div class="flex items-center gap-1.5 shrink-0 text-xs text-slate-500 select-none">
+        <span id="sse-dot" class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>
+        <span id="sse-label" class="hidden sm:inline">connecting…</span>
       </div>
 
-      <div class="flex items-center gap-3">
-        <!-- Live pulse -->
-        <div class="flex items-center gap-1.5 text-xs text-slate-500">
-          <span class="relative flex h-2 w-2">
-            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-          </span>
-          <span class="hidden sm:inline">live</span>
-        </div>
+      <!-- Count -->
+      <span id="count-badge"
+            class="shrink-0 bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-1 rounded-full text-xs tabular-nums">
+        —
+      </span>
 
-        <!-- Request count badge -->
-        <span id="count-badge"
-              class="bg-slate-800 border border-slate-700 text-slate-300 px-2.5 py-1 rounded-full text-xs tabular-nums">
-          {{.Count}} request{{if ne .Count 1}}s{{end}}
-        </span>
+      <!-- Clear -->
+      <button onclick="clearHistory()"
+              class="shrink-0 border border-red-800 bg-red-950/60 hover:bg-red-900/60 text-red-400 hover:text-red-300 px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer">
+        Clear
+      </button>
 
-        <!-- Clear button -->
-        <form method="POST" action="/clear">
-          <button type="submit"
-                  class="border border-red-800 bg-red-950/60 hover:bg-red-900/60 text-red-400 hover:text-red-300 px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer">
-            Clear
-          </button>
-        </form>
-      </div>
     </div>
   </header>
 
-  <!-- ── Main content ────────────────────────────────────────────────────── -->
-  <main class="mx-auto max-w-5xl px-4 py-6">
-
-    <!-- Webhook endpoint hint (mobile) -->
-    <p class="sm:hidden text-slate-500 text-xs mb-4">
-      POST to <code class="text-emerald-400">/webhook</code> to capture requests
-    </p>
-
-    <!-- Requests container — replaced by JS polling -->
-    <div id="requests-container">
-      {{if eq .Count 0}}
-      {{template "empty" .}}
-      {{else}}
-      {{range .Requests}}
-      {{template "card" .}}
-      {{end}}
-      {{end}}
-    </div>
-
-  </main>
-
-  <!-- ── Empty state partial ────────────────────────────────────────────── -->
-  {{define "empty"}}
-  <div class="flex flex-col items-center justify-center py-32 text-slate-600 select-none">
-    <svg class="w-12 h-12 mb-4 opacity-40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round"
-            d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-    </svg>
-    <p class="text-base font-medium text-slate-500">No webhooks captured yet</p>
-    <p class="text-sm mt-1">
-      Send a <span class="text-emerald-500 font-semibold">POST</span>
-      request to <code class="text-emerald-500">/webhook</code>
+  <!-- ── Endpoint URL hint ──────────────────────────────────────────────── -->
+  <div class="mx-auto max-w-5xl px-4 pt-4 pb-0">
+    <p class="text-xs text-slate-600 flex items-center gap-2">
+      POST →
+      <code id="webhook-url" class="text-emerald-500 bg-slate-900 px-1.5 py-0.5 rounded select-all cursor-text"></code>
+      <button onclick="copyText(document.getElementById('webhook-url').textContent, 'URL copied!')"
+              class="text-slate-600 hover:text-slate-400 transition-colors" title="Copy URL">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3"/>
+        </svg>
+      </button>
     </p>
   </div>
-  {{end}}
 
-  <!-- ── Webhook card partial ───────────────────────────────────────────── -->
-  {{define "card"}}
-  <article class="mb-3 rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-lg">
-
-    <!-- Card header -->
-    <div class="flex items-center gap-2.5 px-4 py-2.5 border-b border-slate-800 bg-slate-900/60">
-      <span class="shrink-0 bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 rounded text-xs font-bold tracking-widest uppercase">
-        {{.Method}}
-      </span>
-      <span class="text-slate-500 text-xs">/webhook</span>
-      <span class="ml-auto shrink-0 text-slate-500 text-xs tabular-nums">{{.Timestamp}}</span>
+  <!-- ── Requests ───────────────────────────────────────────────────────── -->
+  <main class="mx-auto max-w-5xl px-4 py-4">
+    <div id="requests-container">
+      <!-- populated by JS after SSE init event -->
     </div>
+  </main>
 
-    <!-- Headers (collapsible) -->
-    <details class="border-b border-slate-800 group">
-      <summary class="px-4 py-2 text-xs text-slate-500 hover:text-slate-300 cursor-pointer select-none flex items-center gap-1.5 list-none">
-        <svg class="w-3 h-3 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
-        </svg>
-        Headers
-        <span class="text-slate-600">({{len .Headers}})</span>
-      </summary>
-      <div class="px-4 pb-3 overflow-x-auto">
-        <table class="w-full text-xs border-collapse">
-          {{range $key, $vals := .Headers}}
-          <tr class="border-t border-slate-800/50 align-top">
-            <td class="py-1 pr-4 text-sky-400 whitespace-nowrap w-48">{{$key}}</td>
-            <td class="py-1 text-slate-300 break-all">{{join $vals ", "}}</td>
-          </tr>
-          {{end}}
-        </table>
-      </div>
-    </details>
-
-    <!-- Body -->
-    <div class="p-4">
-      <p class="text-xs text-slate-500 mb-2 uppercase tracking-widest">Body</p>
-      <pre class="rounded-lg bg-slate-950 border border-slate-800 p-3 text-xs text-slate-300 overflow-auto max-h-72 leading-relaxed whitespace-pre-wrap break-words">{{.Body}}</pre>
-    </div>
-
-  </article>
-  {{end}}
-
-  <!-- ── Polling script ─────────────────────────────────────────────────── -->
   <script>
-    const container   = document.getElementById('requests-container');
-    const countBadge  = document.getElementById('count-badge');
-    let   lastFirstId = null;  // avoid unnecessary DOM rebuilds
+  // ── Endpoint ID (extracted from current URL path) ────────────────────────────
+  const epId = window.location.pathname.split('/').filter(Boolean)[0] || '';
 
-    function escHtml(s) {
-      if (s == null) return '';
-      return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+  // ── Utilities ───────────────────────────────────────────────────────────────
+
+  function escHtml(s) {
+    if (s == null) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Character-by-character JSON syntax highlighter.
+   * Uses a lookahead on ':' to distinguish keys from string values.
+   * Falls back to plain escaped text for non-JSON payloads.
+   */
+  function syntaxHighlight(raw) {
+    if (!raw) return '';
+    const t = raw.trimStart();
+    if (t[0] !== '{' && t[0] !== '[') return escHtml(raw);
+
+    let out = '', i = 0;
+
+    function nextNonWs(pos) {
+      while (pos < raw.length && /\s/.test(raw[pos])) pos++;
+      return raw[pos];
     }
 
-    function renderEmpty() {
-      return `
-        <div class="flex flex-col items-center justify-center py-32 text-slate-600 select-none">
-          <svg class="w-12 h-12 mb-4 opacity-40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round"
-                  d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+    while (i < raw.length) {
+      const ch = raw[i];
+
+      if (ch === '"') {
+        let j = i + 1;
+        while (j < raw.length) {
+          if (raw[j] === '\\') { j += 2; continue; }
+          if (raw[j] === '"')  { j++;    break;    }
+          j++;
+        }
+        const str = raw.slice(i, j);
+        const cls = nextNonWs(j) === ':' ? 'tk-key' : 'tk-str';
+        out += `<span class="${cls}">${escHtml(str)}</span>`;
+        i = j;
+      } else if (ch === 't' && raw.slice(i, i+4) === 'true')  {
+        out += '<span class="tk-kw">true</span>';  i += 4;
+      } else if (ch === 'f' && raw.slice(i, i+5) === 'false') {
+        out += '<span class="tk-kw">false</span>'; i += 5;
+      } else if (ch === 'n' && raw.slice(i, i+4) === 'null')  {
+        out += '<span class="tk-kw">null</span>';  i += 4;
+      } else if (ch === '-' || (ch >= '0' && ch <= '9')) {
+        let j = i;
+        while (j < raw.length && /[\d.eE+\-]/.test(raw[j])) j++;
+        out += `<span class="tk-num">${escHtml(raw.slice(i, j))}</span>`;
+        i = j;
+      } else {
+        out += escHtml(ch);
+        i++;
+      }
+    }
+    return out;
+  }
+
+  let toastTimer;
+  function toast(msg) {
+    const el = document.getElementById('toast');
+    document.getElementById('toast-msg').textContent = msg;
+    el.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.add('hidden'), 2000);
+  }
+
+  function copyText(text, label) {
+    if (!text || text === '(empty body)') return;
+    navigator.clipboard.writeText(text)
+      .then(() => toast(label || 'Copied!'))
+      .catch(() => {
+        const el = Object.assign(document.createElement('textarea'), {value: text});
+        document.body.appendChild(el); el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+        toast(label || 'Copied!');
+      });
+  }
+
+  function buildCurl(req) {
+    const webhookUrl = window.location.origin + '/hook/' + epId;
+    const skip = new Set(['User-Agent', 'Accept-Encoding', 'Content-Length']);
+    const flags = Object.entries(req.headers || {})
+      .filter(([k]) => !skip.has(k))
+      .map(([k, vs]) => `  -H '${k}: ${vs[0].replace(/'/g, "'\\''")}'`)
+      .join(' \\\n');
+    const body = req.body && req.body !== '(empty body)'
+      ? ` \\\n  -d '${req.body.replace(/'/g, "'\\''")}'`
+      : '';
+    return `curl -s -X ${req.method} '${webhookUrl}' \\\n${flags}${body}`;
+  }
+
+  // ── State ───────────────────────────────────────────────────────────────────
+
+  let allRequests = [];
+  let filterText  = '';
+
+  function visible() {
+    if (!filterText) return allRequests;
+    const q = filterText.toLowerCase();
+    return allRequests.filter(r =>
+      r.body.toLowerCase().includes(q) ||
+      Object.entries(r.headers || {}).some(([k, vs]) =>
+        k.toLowerCase().includes(q) || vs.some(v => v.toLowerCase().includes(q))
+      )
+    );
+  }
+
+  // ── Rendering ───────────────────────────────────────────────────────────────
+
+  const container  = document.getElementById('requests-container');
+  const countBadge = document.getElementById('count-badge');
+
+  function renderAll() {
+    const reqs  = visible();
+    const total = allRequests.length;
+    const shown = reqs.length;
+    countBadge.textContent = filterText
+      ? `${shown} / ${total}`
+      : `${total} request${total !== 1 ? 's' : ''}`;
+    container.innerHTML = reqs.length ? reqs.map(renderCard).join('') : renderEmpty();
+  }
+
+  function renderEmpty() {
+    const filtering = filterText && allRequests.length > 0;
+    const hookUrl = window.location.origin + '/hook/' + epId;
+    return `
+      <div class="flex flex-col items-center justify-center py-32 text-slate-600 select-none">
+        <svg class="w-12 h-12 mb-4 opacity-30" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+        ${filtering
+          ? `<p class="text-base font-medium text-slate-500">No match for <span class="text-sky-500">${escHtml(filterText)}</span></p>`
+          : `<p class="text-base font-medium text-slate-500">No webhooks captured yet</p>
+             <p class="text-sm mt-1">Send a <span class="text-emerald-500 font-semibold">POST</span> to <code class="text-emerald-500">${escHtml(hookUrl)}</code></p>`
+        }
+      </div>`;
+  }
+
+  function renderHeaders(headers) {
+    const entries = Object.entries(headers || {});
+    if (!entries.length) return '<p class="text-slate-600 text-xs italic">No headers</p>';
+    return `<table class="w-full text-xs border-collapse">
+      ${entries.map(([k, vs]) => `
+        <tr class="border-t border-slate-800/50 align-top">
+          <td class="py-1 pr-4 text-sky-400 whitespace-nowrap">${escHtml(k)}</td>
+          <td class="py-1 text-slate-300 break-all">${vs.map(escHtml).join(', ')}</td>
+        </tr>`).join('')}
+    </table>`;
+  }
+
+  function renderQuery(query) {
+    if (!query || !Object.keys(query).length) return '';
+    const entries = Object.entries(query);
+    return `
+      <details class="border-b border-slate-800 group">
+        <summary class="px-4 py-2 text-xs text-slate-500 hover:text-slate-300 cursor-pointer select-none list-none flex items-center gap-1.5">
+          <svg class="w-3 h-3 transition-transform group-open:rotate-90 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
           </svg>
-          <p class="text-base font-medium text-slate-500">No webhooks captured yet</p>
-          <p class="text-sm mt-1">
-            Send a <span class="text-emerald-500 font-semibold">POST</span>
-            request to <code class="text-emerald-500">/webhook</code>
-          </p>
-        </div>`;
-    }
+          Query params
+          <span class="text-slate-600">(${entries.length})</span>
+        </summary>
+        <div class="px-4 pb-3 overflow-x-auto">
+          <table class="w-full text-xs border-collapse">
+            ${entries.map(([k, vs]) => `
+              <tr class="border-t border-slate-800/50 align-top">
+                <td class="py-1 pr-4 text-amber-400 whitespace-nowrap">${escHtml(k)}</td>
+                <td class="py-1 text-slate-300 break-all">${vs.map(escHtml).join(', ')}</td>
+              </tr>`).join('')}
+          </table>
+        </div>
+      </details>`;
+  }
 
-    function renderHeaders(headers) {
-      if (!headers || Object.keys(headers).length === 0) return '';
-      const rows = Object.entries(headers).map(([k, vs]) =>
-        `<tr class="border-t border-slate-800/50 align-top">
-           <td class="py-1 pr-4 text-sky-400 whitespace-nowrap w-48">${escHtml(k)}</td>
-           <td class="py-1 text-slate-300 break-all">${vs.map(escHtml).join(', ')}</td>
-         </tr>`
-      ).join('');
-      return `<table class="w-full text-xs border-collapse">${rows}</table>`;
-    }
+  function renderCard(req) {
+    const id = escHtml(req.id);
+    const headerCount = Object.keys(req.headers || {}).length;
+    const queryCount  = Object.keys(req.query  || {}).length;
+    return `
+      <article class="mb-3 rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-lg">
 
-    function renderCard(req) {
-      return `
-        <article class="mb-3 rounded-xl border border-slate-800 bg-slate-900 overflow-hidden shadow-lg">
-          <div class="flex items-center gap-2.5 px-4 py-2.5 border-b border-slate-800 bg-slate-900/60">
-            <span class="shrink-0 bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 rounded text-xs font-bold tracking-widest uppercase">
-              ${escHtml(req.method)}
-            </span>
-            <span class="text-slate-500 text-xs">/webhook</span>
-            <span class="ml-auto shrink-0 text-slate-500 text-xs tabular-nums">${escHtml(req.timestamp)}</span>
+        <!-- Card header -->
+        <div class="flex items-center gap-2.5 px-4 py-2.5 border-b border-slate-800">
+          <span class="shrink-0 bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 rounded text-xs font-bold tracking-widest uppercase">
+            ${escHtml(req.method)}
+          </span>
+          <span class="text-slate-500 text-xs truncate">/hook/${escHtml(epId)}${queryCount ? `<span class="text-amber-500/70">?…</span>` : ''}</span>
+          <span class="ml-auto shrink-0 text-slate-500 text-xs tabular-nums">${escHtml(req.timestamp)}</span>
+        </div>
+
+        <!-- Query params (collapsible, shown only when present) -->
+        ${renderQuery(req.query)}
+
+        <!-- Headers (collapsible) -->
+        <details class="border-b border-slate-800 group">
+          <summary class="px-4 py-2 text-xs text-slate-500 hover:text-slate-300 cursor-pointer select-none list-none flex items-center gap-1.5">
+            <svg class="w-3 h-3 transition-transform group-open:rotate-90 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+            </svg>
+            Headers
+            <span class="text-slate-600">(${headerCount})</span>
+          </summary>
+          <div class="px-4 pb-3 overflow-x-auto">${renderHeaders(req.headers)}</div>
+        </details>
+
+        <!-- Body -->
+        <div class="p-4">
+          <div class="flex items-center justify-between mb-2">
+            <p class="text-xs text-slate-500 uppercase tracking-widest">Body</p>
+            <div class="flex items-center gap-3">
+              <button onclick="copyText(allRequests.find(r=>r.id==='${id}')?.body, 'Body copied!')"
+                      class="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3"/>
+                </svg>
+                body
+              </button>
+              <button onclick="copyText(buildCurl(allRequests.find(r=>r.id==='${id}')), 'curl copied!')"
+                      class="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                </svg>
+                curl
+              </button>
+            </div>
           </div>
+          <pre class="rounded-lg bg-slate-950 border border-slate-800 p-3 text-xs overflow-auto max-h-72 leading-relaxed whitespace-pre-wrap break-words">${syntaxHighlight(req.body)}</pre>
+        </div>
 
-          <details class="border-b border-slate-800 group">
-            <summary class="px-4 py-2 text-xs text-slate-500 hover:text-slate-300 cursor-pointer select-none flex items-center gap-1.5 list-none">
-              <svg class="w-3 h-3 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
-              </svg>
-              Headers
-              <span class="text-slate-600">(${Object.keys(req.headers || {}).length})</span>
-            </summary>
-            <div class="px-4 pb-3 overflow-x-auto">${renderHeaders(req.headers)}</div>
-          </details>
+      </article>`;
+  }
 
-          <div class="p-4">
-            <p class="text-xs text-slate-500 mb-2 uppercase tracking-widest">Body</p>
-            <pre class="rounded-lg bg-slate-950 border border-slate-800 p-3 text-xs text-slate-300 overflow-auto max-h-72 leading-relaxed whitespace-pre-wrap break-words">${escHtml(req.body)}</pre>
-          </div>
-        </article>`;
-    }
+  // ── SSE ─────────────────────────────────────────────────────────────────────
 
-    async function poll() {
-      try {
-        const res = await fetch('/api/requests');
-        if (!res.ok) return;
+  const dot   = document.getElementById('sse-dot');
+  const lbl   = document.getElementById('sse-label');
+  const states = {
+    connecting: ['bg-yellow-500 animate-pulse', 'connecting…'],
+    live:       ['bg-emerald-500 animate-pulse', 'live'],
+    error:      ['bg-red-600',                   'reconnecting…'],
+  };
+  function setSse(state) {
+    dot.className = `w-2 h-2 rounded-full ${states[state][0]}`;
+    lbl.textContent = states[state][1];
+  }
 
-        const requests = await res.json();
-        const count    = Array.isArray(requests) ? requests.length : 0;
-        const firstId  = count > 0 ? requests[0].id : null;
+  function connect() {
+    setSse('connecting');
+    const es = new EventSource('/api/' + epId + '/events');
 
-        // Badge always kept in sync
-        countBadge.textContent =
-          count + ' request' + (count !== 1 ? 's' : '');
+    es.addEventListener('init', e => {
+      allRequests = JSON.parse(e.data) || [];
+      setSse('live');
+      renderAll();
+    });
 
-        // Rebuild cards only when the list actually changed
-        if (firstId === lastFirstId) return;
-        lastFirstId = firstId;
+    es.addEventListener('webhook', e => {
+      allRequests.unshift(JSON.parse(e.data));
+      if (allRequests.length > 50) allRequests.pop();
+      renderAll();
+    });
 
-        container.innerHTML = count === 0
-          ? renderEmpty()
-          : requests.map(renderCard).join('');
+    es.addEventListener('cleared', () => {
+      allRequests = [];
+      renderAll();
+    });
 
-      } catch (_) { /* network hiccup — try again next tick */ }
-    }
+    es.onerror = () => {
+      setSse('error');
+      es.close();
+      setTimeout(connect, 3000);
+    };
+  }
 
-    setInterval(poll, 2000);
+  // ── Controls ────────────────────────────────────────────────────────────────
+
+  async function clearHistory() {
+    await fetch('/api/' + epId + '/clear', {method: 'POST'}).catch(() => {});
+  }
+
+  document.getElementById('search').addEventListener('input', e => {
+    filterText = e.target.value;
+    renderAll();
+  });
+
+  // ── Boot ────────────────────────────────────────────────────────────────────
+
+  document.getElementById('webhook-url').textContent = window.location.origin + '/hook/' + epId;
+
+  // Save to recent endpoints in localStorage
+  try {
+    const recent = JSON.parse(localStorage.getItem('wt_recent') || '[]');
+    const filtered = recent.filter(e => e.id !== epId);
+    filtered.unshift({id: epId, visitedAt: new Date().toISOString()});
+    localStorage.setItem('wt_recent', JSON.stringify(filtered.slice(0, 10)));
+  } catch(_) {}
+
+  connect();
   </script>
 
 </body>

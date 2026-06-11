@@ -5,17 +5,24 @@ import "net/http"
 func (s *Server) RegisterRoutes() http.Handler {
 	mux := http.NewServeMux()
 
-	// Dashboard — exact root only; {$} anchors the match to prevent catch-all behaviour.
-	mux.HandleFunc("GET /{$}", s.handleIndex)
+	// Landing page
+	mux.HandleFunc("GET /{$}", s.handleHome)
 
-	// Capture endpoint — accept any webhook payload.
-	mux.HandleFunc("POST /webhook", s.handleWebhook)
+	// Create a new endpoint and redirect to its dashboard
+	mux.HandleFunc("GET /new", s.handleNew)
 
-	// Clear the in-memory history.
-	mux.HandleFunc("POST /clear", s.handleClear)
+	// Health check — always open
+	mux.HandleFunc("GET /health", s.handleHealth)
 
-	// JSON feed consumed by the polling client for live updates.
-	mux.HandleFunc("GET /api/requests", s.handleAPIRequests)
+	// Webhook receiver — no method prefix = accepts every HTTP method
+	mux.HandleFunc("/hook/{id}", s.handleWebhook)
+
+	// Per-endpoint dashboard (auth-gated when WEBHOOK_TOKEN is set).
+	// Internal API routes use /api/ prefix to avoid wildcard conflicts with /hook/{id}.
+	mux.HandleFunc("GET /{id}", s.requireAuth(s.handleIndex))
+	mux.HandleFunc("GET /api/{id}/events", s.requireAuth(s.handleSSE))
+	mux.HandleFunc("GET /api/{id}/requests", s.requireAuth(s.handleAPIRequests))
+	mux.HandleFunc("POST /api/{id}/clear", s.requireAuth(s.handleClear))
 
 	return mux
 }

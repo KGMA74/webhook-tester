@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Webhook Tester</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-200 font-mono antialiased flex flex-col">
+
+  <main class="flex-1 flex flex-col items-center justify-center px-4 py-16">
+
+    <!-- Hero -->
+    <div class="max-w-sm w-full text-center">
+      <div class="mb-6 flex justify-center">
+        <div class="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center">
+          <svg class="w-7 h-7 text-emerald-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244"/>
+          </svg>
+        </div>
+      </div>
+
+      <h1 class="text-2xl font-bold text-white mb-2 tracking-tight">Webhook Tester</h1>
+      <p class="text-sm text-slate-400 mb-8 leading-relaxed">
+        Instant webhook endpoints.<br>Capture, inspect and debug HTTP requests live.
+      </p>
+
+      <a href="/new"
+         class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-bold px-6 py-3 rounded-xl text-sm transition-colors select-none">
+        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+        </svg>
+        Create new endpoint
+      </a>
+    </div>
+
+    <!-- Recent endpoints (populated from localStorage) -->
+    <div id="recent" class="mt-14 w-full max-w-sm hidden">
+      <p class="text-xs text-slate-600 uppercase tracking-widest mb-3 px-1">Recent endpoints</p>
+      <div id="recent-list" class="space-y-1.5"></div>
+    </div>
+
+  </main>
+
+  <footer class="text-center pb-8">
+    <a href="https://github.com/KGMA74/webhook-tester" target="_blank" rel="noopener"
+       class="text-xs text-slate-700 hover:text-slate-500 transition-colors">
+      Open source · GitHub
+    </a>
+  </footer>
+
+  <script>
+  function formatAgo(iso) {
+    const diff = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 1)  return 'just now';
+    if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+  }
+
+  try {
+    const recent = JSON.parse(localStorage.getItem('wt_recent') || '[]');
+    if (recent.length > 0) {
+      document.getElementById('recent').classList.remove('hidden');
+      document.getElementById('recent-list').innerHTML = recent.map(e => `
+        <a href="/${e.id}"
+           class="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-slate-800 bg-slate-900
+                  hover:border-slate-700 hover:bg-slate-800/80 transition-colors group">
+          <span class="w-2 h-2 rounded-full bg-slate-700 group-hover:bg-emerald-500 transition-colors shrink-0"></span>
+          <code class="text-xs text-sky-400 flex-1 truncate">/hook/${e.id}</code>
+          <span class="text-xs text-slate-600 shrink-0 tabular-nums">${formatAgo(e.visitedAt)}</span>
+        </a>`).join('');
+    }
+  } catch(_) {}
+  </script>
+
+</body>
+</html>

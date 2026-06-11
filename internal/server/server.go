@@ -4,20 +4,20 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	_ "github.com/joho/godotenv/autoload"
 )
 
 type Server struct {
-	port  int
-	store *WebhookStore
-	tmpl  *template.Template
+	port     int
+	registry *EndpointRegistry
+	tmpls    *template.Template
+	token    string // empty = auth disabled
 }
 
 func NewServer(templateFS fs.FS) *http.Server {
@@ -26,24 +26,29 @@ func NewServer(templateFS fs.FS) *http.Server {
 		port = 8080
 	}
 
-	tmpl, err := template.New("index.html").
-		Funcs(template.FuncMap{"join": strings.Join}).
-		ParseFS(templateFS, "template/index.html")
+	tmpls, err := template.New("").ParseFS(templateFS, "template/*.html")
 	if err != nil {
-		log.Fatalf("failed to parse templates: %v", err)
+		slog.Error("failed to parse templates", "err", err)
+		os.Exit(1)
 	}
 
 	srv := &Server{
-		port:  port,
-		store: NewWebhookStore(),
-		tmpl:  tmpl,
+		port:     port,
+		registry: newEndpointRegistry(),
+		tmpls:    tmpls,
+		token:    os.Getenv("WEBHOOK_TOKEN"),
+	}
+
+	if srv.token != "" {
+		slog.Info("auth enabled — UI protected with WEBHOOK_TOKEN")
 	}
 
 	return &http.Server{
-		Addr:         fmt.Sprintf(":%d", srv.port),
-		Handler:      srv.RegisterRoutes(),
-		IdleTimeout:  time.Minute,
+		Addr:    fmt.Sprintf(":%d", srv.port),
+		Handler: srv.RegisterRoutes(),
+		// WriteTimeout must be 0 to allow SSE connections to stay open indefinitely.
+		WriteTimeout: 0,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  time.Minute,
 	}
 }
