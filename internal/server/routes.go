@@ -1,49 +1,21 @@
 package server
 
-import (
-	"encoding/json"
-	"log"
-	"net/http"
-)
+import "net/http"
 
 func (s *Server) RegisterRoutes() http.Handler {
 	mux := http.NewServeMux()
 
-	// Register routes
-	mux.HandleFunc("/", s.HelloWorldHandler)
+	// Dashboard — exact root only; {$} anchors the match to prevent catch-all behaviour.
+	mux.HandleFunc("GET /{$}", s.handleIndex)
 
-	// Wrap the mux with CORS middleware
-	return s.corsMiddleware(mux)
-}
+	// Capture endpoint — accept any webhook payload.
+	mux.HandleFunc("POST /webhook", s.handleWebhook)
 
-func (s *Server) corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "*") // Replace "*" with specific origins if needed
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
-		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-CSRF-Token")
-		w.Header().Set("Access-Control-Allow-Credentials", "false") // Set to "true" if credentials are required
+	// Clear the in-memory history.
+	mux.HandleFunc("POST /clear", s.handleClear)
 
-		// Handle preflight OPTIONS requests
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+	// JSON feed consumed by the polling client for live updates.
+	mux.HandleFunc("GET /api/requests", s.handleAPIRequests)
 
-		// Proceed with the next handler
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (s *Server) HelloWorldHandler(w http.ResponseWriter, r *http.Request) {
-	resp := map[string]string{"message": "Hello World"}
-	jsonResp, err := json.Marshal(resp)
-	if err != nil {
-		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write(jsonResp); err != nil {
-		log.Printf("Failed to write response: %v", err)
-	}
+	return mux
 }

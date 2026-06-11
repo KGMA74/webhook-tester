@@ -1,0 +1,22 @@
+# Version control
+.git
+.gitignore
+
+# Local config (secrets never go into the image)
+.env
+.env.*
+
+# Development tooling
+.air.toml
+.vscode
+.idea
+.claude
+
+# Build artifacts
+main
+main.exe
+*.out
+*.test
+
+# Documentation
+*.md

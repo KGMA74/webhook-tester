@@ -20,6 +20,7 @@ tmp/
 
 # IDE specific files
 .vscode
+.claude
 .idea
 
 # .env file
