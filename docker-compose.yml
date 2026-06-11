@@ -1,12 +1,11 @@
 services:
   webhook-tester:
-    # Build the image locally.
-    # To use a pre-built image instead, replace `build` with:
-    #   image: ghcr.io/<your-org>/webhook-tester:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: webhook-tester:latest
+    # Use the pre-built image from GitHub Container Registry.
+    # To build locally instead, replace `image` with:
+    #   build:
+    #     context: .
+    #     dockerfile: Dockerfile
+    image: ghcr.io/kgma74/webhook-tester:latest
     container_name: webhook-tester
     ports:
       # HOST:CONTAINER — change the left side to expose on a different host port.
