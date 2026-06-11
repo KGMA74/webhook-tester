@@ -2,29 +2,64 @@
 
 A lightweight, self-hosted webhook inspection tool built with Go's standard library (`net/http`).
 
-Send any HTTP POST to `/webhook` and instantly inspect the captured headers and body in a live-updating dark UI — no external services, no accounts, no data leaving your machine.
+Create an instant endpoint, send any HTTP request to it, and inspect headers, query params and body live in a dark UI — no external services, no accounts, no data leaving your machine.
 
 ---
 
 ## Features
 
-- Captures every `POST /webhook` — headers, method, timestamp, and body
+- **Isolated endpoints** — each user creates their own unique URL (`/hook/<id>`)
+- Captures every incoming request — method, headers, query params, body
 - Pretty-prints JSON bodies automatically
-- Stores the **50 most recent** requests in memory (thread-safe, zero persistence)
-- Live UI that auto-refreshes every 2 seconds without a full page reload
-- `POST /clear` endpoint to flush the history
+- Stores the **50 most recent** requests per endpoint (thread-safe, in-memory)
+- Live UI via Server-Sent Events — updates instantly, no polling
+- Recent endpoints saved in `localStorage` and listed on the home page
 - Single static binary — all templates are embedded at compile time
+- Optional Basic Auth via `WEBHOOK_TOKEN`
+
+---
+
+## Quick start
+
+```bash
+# One-liner with Docker
+docker run -d --name webhook-tester -p 8080:8080 ghcr.io/kgma74/webhook-tester:latest
+# → http://localhost:8080
+```
+
+Or with Docker Compose:
+
+```bash
+docker compose up
+# → http://localhost:8111
+```
+
+---
+
+## How it works
+
+1. Open `http://localhost:8080` → click **Create new endpoint**
+2. You get a unique dashboard at `http://localhost:8080/<id>`
+3. Configure your provider (Stripe, GitHub, FlowPay…) to send webhooks to:
+   ```
+   http://your-host/hook/<id>
+   ```
+4. Requests appear live in the dashboard — expand headers, query params, copy body or curl command
 
 ---
 
 ## Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/` | Dashboard UI |
-| `POST` | `/webhook` | Capture a webhook (any body) |
-| `POST` | `/clear` | Flush the in-memory history |
-| `GET` | `/api/requests` | JSON feed used by the live UI |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/` | — | Home — create or reopen an endpoint |
+| `GET` | `/new` | — | Generate a new endpoint and redirect |
+| `GET` | `/{id}` | optional | Live dashboard for that endpoint |
+| `ANY` | `/hook/{id}` | — | Webhook receiver (POST, PUT, GET…) |
+| `GET` | `/api/{id}/events` | optional | SSE stream for the dashboard |
+| `GET` | `/api/{id}/requests` | optional | JSON list of captured requests |
+| `POST` | `/api/{id}/clear` | optional | Flush the endpoint history |
+| `GET` | `/health` | — | Health check → `{"status":"ok"}` |
 
 ---
 
@@ -33,8 +68,7 @@ Send any HTTP POST to `/webhook` and instantly inspect the captured headers and 
 **Prerequisites:** Go 1.22+
 
 ```bash
-# Clone and run
-git clone <repo-url>
+git clone https://github.com/KGMA74/webhook-tester
 cd webhook-tester
 make run
 # → http://localhost:8080
@@ -46,67 +80,77 @@ make watch
 make test
 ```
 
-The port defaults to `8080`. Override it with the `PORT` env var or by editing `.env`.
+The port defaults to `8080`. Override with the `PORT` env var or by editing `.env`.
 
 ---
 
 ## Docker
 
-### Build and run with Docker Compose
-
-```bash
-docker compose up --build
-# → http://localhost:8111
-```
-
-The compose file maps host port **8111** → container port **8080**. Edit `docker-compose.yml` to change it.
-
-### Build the image manually
-
-```bash
-docker build -t webhook-tester:latest .
-```
-
-### Run the container directly
+### Run from GHCR (recommended)
 
 ```bash
 docker run -d \
   --name webhook-tester \
-  -p 8111:8080 \
-  -e PORT=8080 \
-  webhook-tester:latest
+  -p 8080:8080 \
+  ghcr.io/kgma74/webhook-tester:latest
 ```
 
-### Publish to a registry
+### Docker Compose
 
 ```bash
-docker tag webhook-tester:latest ghcr.io/<your-org>/webhook-tester:latest
-docker push ghcr.io/<your-org>/webhook-tester:latest
+docker compose up
+# → http://localhost:8111
 ```
 
-Then replace the `build` block in `docker-compose.yml` with:
+### Build locally
 
-```yaml
-image: ghcr.io/<your-org>/webhook-tester:latest
+```bash
+docker build -t webhook-tester:latest .
+docker run -d -p 8080:8080 webhook-tester:latest
 ```
+
+---
+
+## Configuration
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `PORT` | `8080` | HTTP port to listen on |
+| `WEBHOOK_TOKEN` | _(unset)_ | Enable Basic Auth on the dashboard UI (any username, token as password) |
+
+---
+
+## CI/CD — automatic image publishing
+
+Every push to `main` builds and pushes a multi-arch image (`amd64` + `arm64`) to GHCR via GitHub Actions.
+
+| Event | Tags produced |
+|-------|---------------|
+| Push to `main` | `:main`, `:sha-<short>`, `:latest` |
+| Push tag `v1.2.3` | `:1.2.3`, `:1.2`, `:1`, `:latest` |
+
+No secrets to configure — the workflow uses the built-in `GITHUB_TOKEN`.
 
 ---
 
 ## Testing a capture
 
 ```bash
-# Plain JSON payload
-curl -s -X POST http://localhost:8111/webhook \
+# 1. Create an endpoint (grab the ID from the redirect URL)
+curl -si http://localhost:8080/new | grep location
+# location: /a3f4b2c18e9d4f01
+
+# 2. Send a webhook to that endpoint
+curl -s -X POST http://localhost:8080/hook/a3f4b2c18e9d4f01 \
   -H "Content-Type: application/json" \
   -d '{"event":"payment.success","amount":5000,"currency":"XOF"}'
 
-# Plain text payload
-curl -s -X POST http://localhost:8111/webhook \
-  -H "Content-Type: text/plain" \
-  -d 'ping'
+# 3. Send with query params
+curl -s -X POST "http://localhost:8080/hook/a3f4b2c18e9d4f01?token=abc&source=stripe" \
+  -d '{"type":"charge.succeeded"}'
 
-# Clear the history
-curl -s -X POST http://localhost:8111/clear
+# 4. Clear the endpoint history
+curl -s -X POST http://localhost:8080/api/a3f4b2c18e9d4f01/clear
 ```
 
 ---
@@ -115,17 +159,23 @@ curl -s -X POST http://localhost:8111/clear
 
 ```
 webhook-tester/
+├── .github/
+│   └── workflows/
+│       └── release.yml          # Build & push image to GHCR on push/tag
 ├── cmd/
 │   ├── api/
 │   │   └── main.go              # Entry point, graceful shutdown
 │   └── web/
 │       ├── web.go               # Embeds the template directory into the binary
 │       └── template/
-│           └── index.html       # Dashboard UI (Tailwind CSS CDN)
+│           ├── home.html        # Landing page
+│           └── index.html       # Per-endpoint live dashboard
 ├── internal/
 │   └── server/
-│       ├── server.go            # http.Server construction, template parsing
-│       ├── webhooks.go          # WebhookStore, handlers (index, webhook, clear, api)
+│       ├── endpoint.go          # Endpoint struct + EndpointRegistry
+│       ├── server.go            # http.Server construction
+│       ├── webhooks.go          # Handlers + WebhookStore
+│       ├── sse.go               # SSEBroker (fan-out to connected clients)
 │       ├── routes.go            # Route registration
 │       └── routes_test.go       # Unit tests
 ├── Dockerfile                   # Multi-stage build → scratch image
