@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -56,6 +58,17 @@ func (ws *WebhookStore) GetAll() []WebhookRequest {
 	return out
 }
 
+func (ws *WebhookStore) GetByID(id string) (WebhookRequest, bool) {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	for _, r := range ws.requests {
+		if r.ID == id {
+			return r, true
+		}
+	}
+	return WebhookRequest{}, false
+}
+
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +76,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, `{"status":"ok"}`)
 }
 
-// handleHome serves the landing page.
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tmpls.ExecuteTemplate(w, "home.html", nil); err != nil {
@@ -71,14 +83,12 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleNew creates a fresh endpoint and redirects the browser to its dashboard.
 func (s *Server) handleNew(w http.ResponseWriter, r *http.Request) {
 	ep := s.registry.Create()
 	slog.Info("endpoint created", "id", ep.ID)
 	http.Redirect(w, r, "/"+ep.ID, http.StatusSeeOther)
 }
 
-// handleIndex serves the per-endpoint dashboard shell.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.registry.Get(r.PathValue("id")); !ok {
 		http.NotFound(w, r)
@@ -90,7 +100,6 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleSSE opens a persistent event stream scoped to one endpoint.
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	ep, ok := s.registry.Get(r.PathValue("id"))
 	if !ok {
@@ -112,7 +121,6 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	ch := ep.broker.subscribe()
 	defer ep.broker.unsubscribe(ch)
 
-	// Push current state immediately so the client renders on (re)connect.
 	data, _ := json.Marshal(ep.store.GetAll())
 	fmt.Fprintf(w, "event: init\ndata: %s\n\n", data)
 	flusher.Flush()
@@ -137,7 +145,6 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleWebhook captures any incoming request on /hook/{id} and broadcasts it.
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	ep, ok := s.registry.Get(r.PathValue("id"))
 	if !ok {
@@ -145,7 +152,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB cap
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusInternalServerError)
 		return
@@ -174,11 +181,12 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		"bytes", len(body),
 	)
 
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprint(w, `{"status":"captured"}`)
+	cfg := ep.GetResponseConfig()
+	w.Header().Set("Content-Type", cfg.ContentType)
+	w.WriteHeader(cfg.StatusCode)
+	fmt.Fprint(w, cfg.Body)
 }
 
-// handleClear empties the endpoint store and notifies SSE clients.
 func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
 	ep, ok := s.registry.Get(r.PathValue("id"))
 	if !ok {
@@ -192,7 +200,6 @@ func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, `{"status":"cleared"}`)
 }
 
-// handleAPIRequests returns the current request list as JSON.
 func (s *Server) handleAPIRequests(w http.ResponseWriter, r *http.Request) {
 	ep, ok := s.registry.Get(r.PathValue("id"))
 	if !ok {
@@ -203,6 +210,96 @@ func (s *Server) handleAPIRequests(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(ep.store.GetAll()); err != nil {
 		slog.Error("encode requests", "err", err)
 	}
+}
+
+// handleReplay resends a previously captured request to the same endpoint.
+func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
+	ep, ok := s.registry.Get(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	target, found := ep.store.GetByID(r.PathValue("reqId"))
+	if !found {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+
+	hookURL := fmt.Sprintf("http://127.0.0.1:%d/hook/%s", s.port, ep.ID)
+	if len(target.Query) > 0 {
+		hookURL += "?" + url.Values(target.Query).Encode()
+	}
+
+	var bodyReader io.Reader = http.NoBody
+	if target.Body != "" && target.Body != "(empty body)" {
+		bodyReader = strings.NewReader(target.Body)
+	}
+
+	req, err := http.NewRequestWithContext(r.Context(), target.Method, hookURL, bodyReader)
+	if err != nil {
+		http.Error(w, `{"error":"build failed"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Copy original headers, skip hop-by-hop headers the transport manages.
+	skip := map[string]bool{
+		"Content-Length": true, "Transfer-Encoding": true,
+		"Connection": true, "Keep-Alive": true, "Te": true,
+	}
+	for k, vs := range target.Headers {
+		if skip[k] {
+			continue
+		}
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
+
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		slog.Error("replay failed", "endpoint", ep.ID, "err", err)
+		http.Error(w, `{"error":"replay failed"}`, http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"status":"replayed","code":%d}`, resp.StatusCode)
+}
+
+func (s *Server) handleGetResponseConfig(w http.ResponseWriter, r *http.Request) {
+	ep, ok := s.registry.Get(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	cfg := ep.GetResponseConfig()
+	json.NewEncoder(w).Encode(cfg) //nolint:errcheck
+}
+
+func (s *Server) handleSetResponseConfig(w http.ResponseWriter, r *http.Request) {
+	ep, ok := s.registry.Get(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	var cfg ResponseConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+	if cfg.StatusCode < 100 || cfg.StatusCode > 599 {
+		cfg.StatusCode = 200
+	}
+	if cfg.ContentType == "" {
+		cfg.ContentType = "application/json"
+	}
+	ep.SetResponseConfig(cfg)
+	slog.Info("response config updated", "endpoint", ep.ID, "status", cfg.StatusCode)
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprint(w, `{"status":"updated"}`)
 }
 
 // requireAuth wraps a handler with Basic-Auth enforcement when WEBHOOK_TOKEN is set.
