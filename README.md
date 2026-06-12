@@ -4,6 +4,8 @@ A lightweight, self-hosted webhook inspection tool built with Go's standard libr
 
 Create an instant endpoint, send any HTTP request to it, and inspect headers, query params and body live in a dark UI — no external services, no accounts, no data leaving your machine.
 
+**Live demo → [wt.ryukfearless.digital](https://wt.ryukfearless.digital)**
+
 ---
 
 ## Features
@@ -31,7 +33,7 @@ Or with Docker Compose:
 
 ```bash
 docker compose up
-# → http://localhost:8111
+# → http://localhost:8080
 ```
 
 ---
@@ -99,7 +101,7 @@ docker run -d \
 
 ```bash
 docker compose up
-# → http://localhost:8111
+# → http://localhost:8080
 ```
 
 ### Build locally
@@ -137,20 +139,20 @@ No secrets to configure — the workflow uses the built-in `GITHUB_TOKEN`.
 
 ```bash
 # 1. Create an endpoint (grab the ID from the redirect URL)
-curl -si http://localhost:8080/new | grep location
+curl -si https://wt.ryukfearless.digital/new | grep location
 # location: /a3f4b2c18e9d4f01
 
 # 2. Send a webhook to that endpoint
-curl -s -X POST http://localhost:8080/hook/a3f4b2c18e9d4f01 \
+curl -s -X POST https://wt.ryukfearless.digital/hook/a3f4b2c18e9d4f01 \
   -H "Content-Type: application/json" \
   -d '{"event":"payment.success","amount":5000,"currency":"XOF"}'
 
 # 3. Send with query params
-curl -s -X POST "http://localhost:8080/hook/a3f4b2c18e9d4f01?token=abc&source=stripe" \
+curl -s -X POST "https://wt.ryukfearless.digital/hook/a3f4b2c18e9d4f01?token=abc&source=stripe" \
   -d '{"type":"charge.succeeded"}'
 
 # 4. Clear the endpoint history
-curl -s -X POST http://localhost:8080/api/a3f4b2c18e9d4f01/clear
+curl -s -X POST https://wt.ryukfearless.digital/api/a3f4b2c18e9d4f01/clear
 ```
 
 ---
